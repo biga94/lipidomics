@@ -1,0 +1,288 @@
+---
+title: "Primo set di analisi sui dati di lipidomica"
+author: "Davide Biganzoli"
+format: pdf
+editor: visual
+date: 02/05/2023
+date-modified: 03/05/2023
+bibliography: grateful-refs.bib
+---
+
+```{r}
+#| echo: false
+#| output: false
+library(readxl)
+library(lipidr)
+library(tidyverse)
+library(FactoMineR)
+library(factoextra)
+library(kableExtra)
+library(grateful)
+```
+
+```{r}
+#| echo: false
+#| output: false
+set.seed(1994)
+
+data <- read_excel("22QT37 Results_lipidomica rielab_26.04.2023.xlsx", 
+                                                           sheet = "Results TOT (2)")
+
+data$`Metabolite name` <- gsub("\\|.*", "", data$`Metabolite name`) #rimuovo tutto il supplementary
+
+#A causa di incompatibilità di nomenclatura, ho convertito le stringe nella nomenclatura
+#LIPID MAPS, così da non perdere l'informazione sull'ontologia
+
+data$`Metabolite name` <-  sub(";(O\\d*)", "(\\1)", data$`Metabolite name`)
+data$`Metabolite name` <-  sub(" O-", "O ", data$`Metabolite name`)
+data$`Metabolite name` <-  sub(" P-", "P ", data$`Metabolite name`)
+data$`Metabolite name` <-  sub("-FA", "/", data$`Metabolite name`)
+
+data[,9:24] <- log(data[,9:24]) #dati log-normalizzati
+data <- data[,-c(1:6)]
+
+duplicate_rows <- data[duplicated(data$`Metabolite name`) | duplicated(data$`Metabolite name`, fromLast = TRUE),]
+data_new <- data[!duplicated(data$`Metabolite name`),]
+
+# Crea una variabile "indice" contenente un numero per ogni coppia di ripetizioni
+duplicate_rows$indice <- rep(1:(nrow(duplicate_rows)/2), each = 2)
+
+# Aggiungi "_1" alle prime ripetizioni di ogni coppia
+duplicate_rows$`Metabolite name`[seq(1, nrow(duplicate_rows), by = 2)] <- paste0(duplicate_rows$`Metabolite name`[seq(1, nrow(duplicate_rows), by = 2)], " (1)")
+
+# Aggiungi "_2" alle seconde ripetizioni di ogni coppia
+duplicate_rows$`Metabolite name`[seq(2, nrow(duplicate_rows), by = 2)] <- paste0(duplicate_rows$`Metabolite name`[seq(2, nrow(duplicate_rows), by = 2)], " (2)")
+
+# Rimuovi la variabile "indice" se non ti serve più
+duplicate_rows$indice <- NULL
+
+data <- rbind(data_new, duplicate_rows)
+
+#Creazione dataset informazione clinica
+annotations <- names(data)[3:18]
+data_clin <- data.frame(Sample = annotations)
+data_clin$Group <- sub(".*_.*_(.*)", "\\1", data_clin$Sample)
+data_clin$Group <- factor(data_clin$Group)
+
+rm(annotations)
+
+```
+
+## Introduzione
+
+La lipidomica è una disciplina emergente che si concentra sull'analisi quantitativa dei lipidi all'interno di un campione biologico. I lipidi sono una classe di biomolecole complessa e eterogenea, che svolgono un ruolo chiave in una vasta gamma di processi biologici, tra cui la regolazione del metabolismo energetico, la membrana cellulare e la segnalazione cellulare.
+
+Negli ultimi decenni, la lipidomica ha fatto passi da gigante nella comprensione del ruolo dei lipidi nella fisiologia e nella patologia umana, grazie anche alle tecnologie di analisi avanzate, come la spettrometria di massa che permettono di quantificare migliaia di lipidi in un'unica analisi.
+
+In questo primo report, ho prodotto una prima analisi descrittiva che include dei boxplot che mostrano come ogni classe di lipidi distribuisce in termini di intensità. Inoltre, per rappresentare i campioni, ho prodotto dei boxplot che riportano la distribuzione dei valori per ogni sample.\
+In seguito, ho effettuato due distinte analisi delle componenti principali:
+
+1.  L'analisi della PCA sui dati non trasposti, che vuole esaminare la variabilità tra i campioni rispetto ai lipidi. La PCA viene eseguita su tutti i lipidi e fornisce una rappresentazione delle relazioni tra i campioni in base alla quantità dei lipidi.
+
+2.  L'analisi della PCA sui dati trasposti che invece esamina la variabilità tra i lipidi rispetto ai campioni. La PCA viene eseguita su tutti i campioni e fornisce una rappresentazione delle relazioni tra i lipidi in base alle espressioni nei campioni.
+
+In entrambi i casi, l'obiettivo della PCA è di ridurre la dimensionalità del dataset mantenendo al contempo le informazioni più significative. Tuttavia, la disposizione dei dati influenzerà la forma e l'interpretazione del risultato della PCA.
+
+Ho infine effettuato una prima analisi univariata producendo dei modelli di regressione lineare, così da poter identificare le classi di lipidi significativamente differenti tra le condizioni biologiche.
+
+| ID        | Gruppo | mg campione |
+|:----------|:------:|:-----------:|
+| Sample_5  |   NW   |    87.4     |
+| Sample_16 |   NW   |    53.9     |
+| Sample_18 |   NW   |    80.0     |
+| Sample_20 |   NW   |    73.1     |
+| Sample_25 |   NW   |    51.6     |
+| Sample_1  |   OW   |    89.3     |
+| Sample_4  |   OW   |    88.4     |
+| Sample_21 |   OW   |    68.3     |
+| Sample_2  |   OB   |    81.8     |
+| Sample_3  |   OB   |    69.9     |
+| Sample_6  |   OB   |    60.9     |
+| Sample_7  |   OB   |    65.5     |
+| Sample_10 |   OB   |    85.7     |
+| Sample_26 |   OB   |    72.0     |
+| Sample_8  |   SV   |    79.6     |
+| Sample_9  |   SV   |    105.5    |
+
+: Dove: NW = Normoweight (o CTRL, n=5); OW = Overweight (n=3); OB = Obese (n=6); SV = Severe obesity (n=2).
+
+## Analisi descrittiva
+
+Ai dati era stata già effettuata una normalizzazione "Internal Standard" (IS), che in generale permette di correggere le variazioni introdotte dalla variabilità della matrice biologica, dalla variabilità degli strumenti di analisi e dalla variabilità dell'efficienza di ionizzazione. In seguito la media di ciascun analita è stata normalizzata per i mg di campione (Tabella 1).
+
+Ai dati ho applicato la trasformata logaritmica per far fronte alla forte dispersione dei valori di picco per alcune classi di citochine.
+
+```{r}
+#| echo: false
+#| output: false
+#| error: false
+
+d <- as_lipidomics_experiment(data[,-2], logged = T, normalized = T)
+d <- add_sample_annotation(d, data_clin)
+```
+
+Inizialmente vi erano 43 differenti classi di lipidi, ma ho preferito raggruppare alcune subclassi: come ad esempio le Ceramidi, che sono state raggruppate tutte sotto l'identificativo "Cer", seguendo l'ontologia proposta da [LIPID MAPS](https://www.lipidmaps.org/) (che risulta essere quella più comune ed implementata nelle pipeline di analisi). Ovviamente se vogliamo fare analisi più approfondite sulle sub-classi, non è un problema riconvertire le classi secondo l'ontologia precedente.
+
+Qui sotto ho riportato tutte le 29 classi di lipidi incluse nel dataset:
+
+```{r}
+#| echo: false
+#| output: true
+knitr::kable(table(rowData(d)[22]))
+```
+
+In totale ci sono 870 analiti, tenendo conto dei 24 lipidi che si ripetono nel nome ma che ricadono in una subclasse differente.
+
+Come è possibile vedere, ci sono alcune classi che contengono un solo lipide riportato. Seppur non riportata, vi è una classe NA che riporta al suo interno solo 3 lipidi ( Cer 18:1(O2)/34:3, CoQ5, SL 15:2(O)/36:0 ).
+
+Ho voluto visualizzare anche come distribuisce ogni classe di lipidi per i valori di area di picco:
+
+```{r}
+#| echo: false
+#| output: true
+#| fig-cap: "Boxplot chart per esaminare la distribuzione dei valori di area di picco per classe di lipidi"
+
+plot_lipidclass(d,"boxplot")
+```
+
+Per quanto riguarda i 16 sample posso produrre dei boxplot informativi che valutino la distribuzione dei valori per ognuno:
+
+```{r}
+#| echo: false
+#| output: true
+#| fig-cap: "Boxplot chart per esaminare la distribuzione dei valori di area di picco per sample"
+
+plot_samples(d, "boxplot")
+```
+
+Vediamo che le distribuzioni sono uniformi, tenendo conto del fatto che i dati erano stati già pre-processati da Unitech OMICs. Infatti, di tutti i lipidi sono stati considerati quelli che, **nei campioni Pool**, presentavano un valore di area con CV% inferiore del 30%.
+
+## Analisi multivariata
+
+Ho quindi deciso di produrre una prima analisi delle componenti principali, come specificato nell'[introduzione]:
+
+In generale, se si è interessati a comprendere le relazioni tra i campioni, si dovrebbe eseguire la PCA come indicato al punto 1. Se invece si è interessati a comprendere le relazioni tra i gruppi di lipidi, si dovrebbe eseguire la PCA come indicato al punto 2.
+
+### PCA (1): dati non trasposti
+
+```{r}
+#| echo: false
+#| output: false
+#| cache: true
+pca0 <- PCA(data, scale.unit = T, graph = F, quali.sup = 1:2)
+```
+
+Di nuovo, questo tipo di setting dell'analisi delle componenti principali vuole esaminare la variabilità tra i campioni rispetto ai lipidi:
+
+```{r}
+#| echo: false
+#| output: true
+fviz_eig(pca0)
+```
+
+```{r}
+#| echo: false
+#| output: true
+#| fig-cap: "Screeplot e biplot di PCA (1)"
+fviz_pca_biplot(pca0, geom = "point", col.var = "black", addEllipses = F,
+                col.ind = "darkgoldenrod1",alpha.ind = 0.4, label = c("ind", "ind.sup", "var"),
+                repel = T, title = "", axes = c(1,2))
+```
+
+Nella prima immagine ho riportato lo screeplot che visualizza quanto ogni componente spiega la varianza dei campioni. Nella seconda ho voluto rappresentare come si dispongono sul piano bidimensionale tutti i punti, corrispondenti ai singoli lipidi; inoltre ho sovrapposto un biplot riportante i vettori, i quali con la direzione e la lunghezza indicano la correlazione tra i sample e la loro importanza nella descrizione della varianza dei dati. Si evidenziano una forte correlazione tra i campioni del gruppo di controllo (NW); inoltre si verifica la medesima condizione tra gli altri gruppi e, intersecandosi perpendicolarmente con i vettori di controllo si evidenzia maggiormente l'assenza di correlazione tra i due cluster di vettori.
+
+Riporto qui sotto la rappresentazione della seconda e della terza componente:
+
+```{r}
+#| echo: false
+#| output: true
+
+fviz_pca_biplot(pca0, geom = "point", col.var = "black", addEllipses = F,
+                col.ind = "darkgoldenrod1",alpha.ind = 0.4, label = c("ind", "ind.sup", "var"),
+                repel = T, title = "", axes = c(2,3))
+```
+
+### PCA (2): dati trasposti
+
+Nuovamente, questo setting delle analisi permette di esaminare la variabilità tra i lipidi rispetto ai campioni, fornendo una rappresentazione delle relazioni tra i lipidi in base alle espressioni nei campioni.
+
+```{r}
+#| echo: false
+#| output: false
+#| cache: true
+
+rownames(data_new) <- data_new$`Metabolite name`
+data_new <- t(data_new)
+data_new <- data_new[-c(1:2),]
+
+data_new <- as.data.frame(data_new)
+data_new[] <- lapply(data_new, as.numeric)
+data_new <- cbind(data_new, data_clin$Group)
+
+pca1 <- PCA(data_new, scale.unit = T, graph = F, quali.sup = 823)
+```
+
+Come sopra riporto lo screeplot e la rappresentazione sul piano bidimensionale, con biplot, della prima e della seconda componente:
+
+```{r}
+#| echo: false
+#| output: true
+
+fviz_eig(pca1)
+```
+
+```{r}
+#| echo: false
+#| output: true
+#| fig-cap: "Screeplot e biplot di PCA (2)"
+fviz_pca_biplot(pca1, axes = c(1,2), geom = "point",
+                col.var = "black", addEllipses = F,
+                habillage = data_clin$Group,
+                alpha.ind = 1, alpha.var = 0.03, label = c("ind"),
+                repel = T, title = "PCs 1 and 2", geom.ind = c("text", "point"))
+```
+
+E aggiungo anche la rappresentazione della seconda e della terza:
+
+```{r}
+#| echo: false
+#| output: true
+#| fig-cap: "Seconda e terza componente proiettate per la PCA (2)"
+fviz_pca_biplot(pca1, axes = c(2,3), geom = "point",
+                col.var = "black", addEllipses = F,
+                habillage = data_clin$Group,
+                alpha.ind = 1, alpha.var = 0.03, label = c("ind"),
+                repel = T, title = "PCs 2 and 3", geom.ind = c("text", "point"))
+```
+
+## Analisi univariata
+
+L'analisi univariata può essere svolta fra due gruppi, può essere multi-gruppi o anche multi-fattoriale, tuttavia ho preferito partire dal confronto tra il gruppo NW (che rappresenta il nostro controllo) contro tutti gli altri gruppi (OW, OB e SV).
+
+L'obiettivo è quello di identificare eventuali differenze significative nei livelli di regolazione dei lipidi, che possono essere attribuite ai vari gruppi (ossia, le condizioni sperimentali che confrontiamo).
+
+Per fare ciò, ho adattato un modello lineare per modellare una relazione tra variabile dipendente (in questo caso, i valori di area di picco) e una o più variabili indipendenti (nel nostro caso le condizioni sperimentali). Ho così calcolato una statistica t moderata, che tiene conto della variabilità dei dati e si adatta ai confronti multipli, aiutando a ridurre il rischio di falsi positivi (ad esempio, identificare differenze che non sono effettivamente significative).
+
+Il "volcano plot" è un tipo di grafico comunemente utilizzato negli studi -omici per visualizzare i dati delle analisi delle differenze di espressione dei lipidi in diversi campioni.
+
+```{r}
+#| echo: false
+#| output: true
+#| fig-cap: "Volcano Plots coi tre confronti"
+
+use_interactive_graphics(interactive = F)
+two_group <- de_analysis(d, NW-OW, NW-OB, NW-SV)
+plot_results_volcano(two_group)
+```
+
+I tre volcano plot riportano i tre confronti, come stabilito sopra. L'asse delle ordinate rappresenta la misura della significatività statistica dell'effetto di un trattamento o di una condizione su un certo lipide, mentre l'asse delle ascisse rappresenta il valore del logaritmo del fold change di quel lipide. Il *p*-value indica la significatività statistica dell'associazione tra un gene e un trattamento o condizione, e in questo setting è stato calcolato con un aggiustamento per Benjamini-Hochberg. Questo metodo controlla l'expected false discovery rate (FDR) sotto la soglia (specificata) di 0.05.
+
+Com'è possibile vedere dai volcano plots, a fronte di un elevato numero di lipidi facenti parte della famiglia dei trigliceridi (TG, con 248 lipidi), delle fosfatidilcoline (PC, con 126 lipidi) e fosfatidiletanolamine (PE, con 103 lipidi) non è facile interpretare questo risultato. Tuttavia, quello che emerge è che prendendo per esempio la classe dei diacilgliceroli (DG), si evidenzia una up-regulation di questi nei pazienti normopeso.
+
+## Software usati per le analisi
+
+```{r}
+#| echo: false
+#| output: true
+cite_packages(output = "paragraph", out.dir = ".")
+```
